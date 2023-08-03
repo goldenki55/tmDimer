@@ -1,0 +1,40 @@
+# Options for MASTER https://grigoryanlab.org/master/
+CREATE_PDS_LOC
+RUN_MASTER_LOC
+PDSLIST_DATABSE
+RMSD_CUT    1.0
+OUTPUT_MASTER_FILES True
+
+# Background Amino Acid Frequencies - TM AA frequencies
+BG_AA_FREQ  A   0.1102
+BG_AA_FREQ  R   0.0256
+BG_AA_FREQ  N   0.0225
+BG_AA_FREQ  D   0.0135
+BG_AA_FREQ  C   0.0141
+BG_AA_FREQ  Q   0.0168
+BG_AA_FREQ  E   0.0178
+BG_AA_FREQ  G   0.0752
+BG_AA_FREQ  H   0.0102
+BG_AA_FREQ  I   0.1007
+BG_AA_FREQ  L   0.1525
+BG_AA_FREQ  K   0.0203
+BG_AA_FREQ  M   0.0342
+BG_AA_FREQ  P   0.0298
+BG_AA_FREQ  F   0.0824
+BG_AA_FREQ  S   0.0544
+BG_AA_FREQ  T   0.0519
+BG_AA_FREQ  W   0.0259
+BG_AA_FREQ  Y   0.0409
+BG_AA_FREQ  V   0.1005
+
+# Options for initializing the input structure
+CUT_FRAG_LEN    9
+DEL_DIST_CUT    2.6
+
+# Options for design, position score weight and sequence comp score weight are relative to covariant score weight at 1
+OUTPUT_SEQ_TABLES   True
+PSU_COUNT   1.0
+POSITION_SCORE_WEIGHT   0.5
+SEQUENCECOMP_SCORE_WEIGHT   0.3
+SEQ_ITERS   500
+SEQ_MUTATIONS   200
