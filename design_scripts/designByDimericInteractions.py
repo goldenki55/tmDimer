@@ -516,12 +516,19 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
 
 
 def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path,
-              sequenceLength: int, identifier:str = None, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
+              identifier:str = None, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
     if(identifier == None):
         identifier = os.path.splitext(pdbFile)[0]
     parser = PDBParser()
     structure = parser.get_structure("", pdbFile)
     selectedChains = [chain for chain in structure.get_chains() if chain.get_id() in chainSelection]
+    foundIDs = []
+    sequenceLength = 0
+    for chain in selectedChains:
+        for residue in chain:
+            if(residue.get_id()[1] not in foundIDs):
+                sequenceLength += 1
+                foundIDs.append(residue.get_id()[1])
     resConnections = getAdjMap(selectedChains)
     posProbMap, jointProbMap = initStruct(resConnections, outputLocation, parser)
     out, rosetta, ppm = buildMap(sequenceLength, posProbMap, jointProbMap, resConnections, sequenceFixMap)
@@ -566,7 +573,11 @@ def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outp
                     outFile.write(val[3] + ": " + str(round(val[0], 3)) + ', ' + str(round(val[1], 3)) + ', ' + str(
                         round(val[2], 3)) + '\n')
 
+def designBBDataBase(inputBBDatabase: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path):
+    return
 
+def scorePDB(pdbFile: os.path, chainSelection: list, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
+    return
 
 if __name__ == '__main__':
     import argparse
