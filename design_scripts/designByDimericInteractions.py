@@ -38,7 +38,7 @@ def parsePARAMS(paramFile):
                 masterCreatePDSPath = os.path.normpath(line[1])
             elif(line[0] == 'RUN_MASTER_LOC'):
                 masterPath = os.path.normpath(line[1])
-            elif(line[0] == 'PDSLIST_DATABASE'):
+            elif(line[0] == 'PDSLIST_DATABSE'):
                 masterDBPDSList = os.path.normpath(line[1])
             elif(line[0] == 'RMSD_CUT'):
                 masterRMSD = float(line[1])
@@ -102,7 +102,7 @@ if os.path.exists(os.path.join(_parent_dir, "designPARAMS")):
         bg_AA_freq = {'A': 0.1102, 'R': 0.0256, 'N': 0.0225, 'D': 0.0135, 'C': 0.0141, 'Q': 0.0168, 'E': 0.0178,
                       'G': 0.0752, 'H': 0.0102, 'I': 0.1007, 'L': 0.1525, 'K': 0.0203, 'M': 0.0342, 'P': 0.0298,
                       'F': 0.0824, 'S': 0.0544, 'T': 0.0519, 'W': 0.0259, 'Y': 0.0409, 'V': 0.1005}
-    elif(bg_AA_freq.keys != set("ARNDCQEGHILKMPFSTWYV")):
+    elif(bg_AA_freq.keys() != set("ARNDCQEGHILKMPFSTWYV")):
         raise ValueError("Input background amino acid frequency is incomplete")
 else:
     raise FileNotFoundError("designPARAMS file not found in script directory")
@@ -111,11 +111,11 @@ else:
 # deltaDistCut describes the difference between the minimum Ca-Ca distance across the helix interface
 # from the input model and the allowed maximum. For a close helix-helix interface should be ~2.6, the distance of
 # a helix radius. For other interactions, may be useful to raise this
-def getAdjMap(inputChains, deltaDistCut = deltaDistCut):
+def getAdjMap(inputChains, focusChains, deltaDistCut = deltaDistCut):
     # Get list of Ca-Ca distances across helix-helix interface to find minimum distance
     minDist = np.inf
-    for i in range(len(inputChains)):
-        chainA = inputChains[i]
+    for i in range(len(focusChains)):
+        chainA = focusChains[i]
         for j in range(i+1, len(inputChains)):
             chainB = inputChains[j]
             for resA in chainA:
@@ -126,8 +126,8 @@ def getAdjMap(inputChains, deltaDistCut = deltaDistCut):
     maxDistCutOff = minDist + deltaDistCut
 
     adjacenices = {}
-    for i in range(len(inputChains)):
-        chainA = inputChains[i]
+    for i in range(len(focusChains)):
+        chainA = focusChains[i]
         for j in range(i+1, len(inputChains)):
             chainB = inputChains[j]
 
@@ -151,15 +151,13 @@ def getAdjMap(inputChains, deltaDistCut = deltaDistCut):
 # Run Master, Method of Accelerated Search for Tertiary Ensemble Representative, and add the output to a temporary location
 def master(queryPDB, workingDir, seqFile, rmsdCut, targetlist=masterDBPDSList, createPDSLocation=masterCreatePDSPath, runMasterLocation=masterPath):
     queryPDS = os.path.join(workingDir, 'query.pds')
-    subprocess.run([createPDSLocation, '--type', 'query', '--pdb', queryPDB, '--pds', queryPDS,
-                    '--cleanPDB'], stdout=subprocess.DEVNULL)
+    subprocess.run([createPDSLocation, '--type', 'query', '--pdb', queryPDB, '--pds', queryPDS,], stdout=subprocess.DEVNULL)
     subprocess.run(
         [runMasterLocation, '--query', queryPDS, '--targetList', targetlist, '--rmsdCut', str(rmsdCut),
          #'--matchOut', os.path.join(workingDir, 'match.match'),
          '--seqOut', seqFile,
          # '--structOut',os.path.join(workingDir,'struct/')
          ], stdout=subprocess.DEVNULL)
-    os.remove(queryPDS)
 
 # Cuts a two helix interface into fragLen length fragments, each showcasing an interaction centered about an
 # interaction, and returns the file of the cut fragment. Must be provided the BioPython residue object of the residue
@@ -191,27 +189,40 @@ def cutPDB(fragLen, central_res_A, central_res_B, outPath, io):
 # assumed adjacencies by a-g lettering w/ their union freq/prob and position-position covariance.
 # Internal method, uses instantiated structure
 # resConnections has the residues ORDERED, and chain specific
-def initStruct(resConnections, workingDir, parser, rmsd=masterRMSD, fragLen=fragLength, pseudoCount=psuedoCount, silent=outputMasterFiles):
+def initStruct(resConnections, workingDir, parser, pdbio, rmsd=masterRMSD, fragLen=fragLength, pseudoCount=psuedoCount, outputMasterFiles=outputMasterFiles):
     AsideCenters = []
     BsideCenters = []
+    nonOverlap = int((fragLen-3)/2)     # Minimum separation between two centers on the same chain, reduces # master searches
     for keyPair in resConnections:
-        AsideCenters.append(keyPair[0])
-        BsideCenters.append(keyPair[1])
+        sampled = False
+        for prevA, prevB in zip(AsideCenters,BsideCenters):
+            if (prevA.getChain() == keyPair[0].get_chain() and prevB.get_chain() == keyPair[1].get_chain()):
+                if (abs(prevA.get_id()[1] - keyPair[0].get_id()[1]) < nonOverlap and abs(
+                        prevB.get_id()[1] - keyPair[1].get_id()[1]) < nonOverlap):
+                    sampled = True
+            if (prevA.getChain() == keyPair[1].get_chain() and prevB.get_chain() == keyPair[0].get_chain()):
+                if (abs(prevA.get_id()[1] - keyPair[1].get_id()[1]) < nonOverlap and abs(
+                        prevB.get_id()[1] - keyPair[0].get_id()[1]) < nonOverlap):
+                    sampled = True
+        if not sampled:
+            AsideCenters.append(keyPair[0])
+            BsideCenters.append(keyPair[1])
+
     fragmentPDBs = []
     ids = []
-    io = PDBIO()
+    i = 0
     for aside,bside in zip(AsideCenters,BsideCenters):
-
-        id = 'A'+str(aside.get_id()[1])+'_B'+str(bside.get_id()[1])
-        ids.append(id)
-        output = os.path.join(workingDir, 'cutFrag_' + id + '.pdb')
-        cutPDB(fragLen, aside, bside, output, io)
+        name = 'cutFrag_'+str(i)
+        ids.append(name)
+        i += 1
+        output = os.path.join(workingDir, name + '.pdb')
+        cutPDB(fragLen, aside, bside, output, pdbio)
         fragmentPDBs.append(output)
 
     seqFiles = []
     # Run master
-    for pdb,id in zip(fragmentPDBs,ids):
-        seqFile = os.path.join(workingDir, id + '.seq')
+    for pdb,name in zip(fragmentPDBs,ids):
+        seqFile = os.path.join(workingDir, name + '.seq')
         seqFiles.append(seqFile)
         master(pdb, workingDir, seqFile, masterRMSD)
 
@@ -245,18 +256,19 @@ def initStruct(resConnections, workingDir, parser, rmsd=masterRMSD, fragLen=frag
             inverseKey = (keyPair[1], keyPair[0])
             jointFreqMap[inverseKey] = pairwiseMap
 
+    totalScaledMatchCount = 0.0
     # Parse master generated sequence files and count amino acid occurences at each position and pairwise interaction
     for pdb,seqFile in zip(fragmentPDBs, seqFiles):
         fragment = parser.get_structure("",pdb)
         fragChainA, fragChainB = fragment.get_chains()
-        if(silent):
+        if(not outputMasterFiles):
             os.remove(pdb)
 
         chainA_endInd = 0
         keys = []
         for chain in [fragChainA, fragChainB]:
             for i, residue in enumerate(chain):
-                keys.append((chain.get_id(), residue.get_id()[1]))
+                keys.append(residue.get_id()[1])
             if (chainA_endInd == 0):
                 chainA_endInd = i
         keys = keys[1:chainA_endInd-2] + keys[chainA_endInd+2:-1]  # Remove the most flanking residues from consideration
@@ -284,6 +296,7 @@ def initStruct(resConnections, workingDir, parser, rmsd=masterRMSD, fragLen=frag
                 line = line.strip().split(' ')      # Master sequence file, output is `RMSD AA1 AA2 AA3 ...`
                 # RMSD deviation of found fragment weighting, this is a function that could be optimized
                 weight = math.exp(-1*float(line[0]))/scaling
+                totalScaledMatchCount += weight
                 seq = []
                 for res in line[1:]:
                     try:
@@ -297,8 +310,9 @@ def initStruct(resConnections, workingDir, parser, rmsd=masterRMSD, fragLen=frag
                 for res,key in zip(seq,keys):
                     if(res == 'X'):
                         continue
-                    freqMap[key][res] += weight
-                    freqMap[key]['count'] += weight
+                    if(key in freqMap):
+                        freqMap[key][res] += weight
+                        freqMap[key]['count'] += weight
                 for key in pairwiseKeys:
                     resA = seq[pairwiseKeys[key][0]]
                     resB = seq[pairwiseKeys[key][1]]
@@ -306,33 +320,41 @@ def initStruct(resConnections, workingDir, parser, rmsd=masterRMSD, fragLen=frag
                         continue
                     jointFreqMap[key][(resA,resB)] += weight
                     jointFreqMap[key]['count'] += weight
-        if(silent):
+        if(not outputMasterFiles):
             os.remove(seqFile)
 
 
-    for key in freqMap:
-        count = freqMap[key]['count']
-        for res in freqMap[key]:
-            freqMap[key][res] = freqMap[key][res]/count
+    for posMap in freqMap.values():
+        count = posMap['count']
+        del posMap['count']
+        for res in posMap:
+            posMap[res] = posMap[res]/count
 
-    for keyPair in jointFreqMap:
-        count = jointFreqMap[keyPair]['count']
-        for resPair in jointFreqMap[keyPair]:
-            jointFreqMap[keyPair][resPair] = jointFreqMap[keyPair][resPair]/count
+    visited = []
+    for jointMap in jointFreqMap.values():
+        if(jointMap in visited):
+            continue
+        visited.append(jointMap)
+        count = jointMap['count']
+        del jointMap['count']
+        for resPair in jointMap:
+            jointMap[resPair] = jointMap[resPair]/count
 
-    return freqMap, jointFreqMap
+    return freqMap, jointFreqMap, totalScaledMatchCount
 
 
 # Fixed position should be a map
 # resConnections is ORDERED, with the keys as chain-specific Biopython.residue objects
 # jointProbMap is UNORERED, with keys as indices, either ordering of keys (i, j) or (j, i) return the same probability map
 # position realtive weight defines the weight of the single position sequence versus the pairwise information (weighted as 1)
-def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, background_AA_frequency = bg_AA_freq,
+def buildMap(minResInd, maxResInd, posProbMap, jointProbMap, resConnections, fixedPos, background_AA_frequency = bg_AA_freq,
              position_relative_weight = positionRelWeight, sequenceComp_relative_weight = sequenceCompRelWeight,
              sequenceIterations=sequenceIterations, sequenceMutations=sequenceMutations):
     aminoAcids = list("ACDEFGHIKLMNPQRSTVYW")
 
     adjacencies = {}       # Maps any index to all of its nearby (in 3D space) residue indicies
+    posProbMap = copy.deepcopy(posProbMap)
+    jointProbMap = copy.deepcopy(jointProbMap)
     for keyPair in jointProbMap:
         if(keyPair[0] not in adjacencies):
             adjacencies[keyPair[0]] = [keyPair[1]]
@@ -346,17 +368,17 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
         indexKeyPair = (keyPair[0].get_id()[1], keyPair[1].get_id()[1])
         jointProbMap[indexKeyPair]['distance weight'] = resConnections[keyPair]
 
-    inputSeq = list('X'*seqLen)
     for val in adjacencies:
         adjacencies[val] = list(set(adjacencies[val]))      # Remove duplicates
-        inputSeq[val-1] = 'A'                               # Initiate all sequence to be designed to Ala
 
-    for position in fixedPos:
-        inputSeq[position-1] = fixedPos[position]
-    fixedPos = set(fixedPos.keys())
-
+    visited = []
     for position in jointProbMap.values():
+        if(position in visited):
+            continue
+        visited.append(position)
         for aaPair in position:
+            if(type(aaPair) != tuple):
+                continue
             aaPairProb = position[aaPair]
             # Edge value function, weight*prob*log2(joint prob/independent background prob)
             position[aaPair] = position['distance weight'] \
@@ -369,24 +391,29 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
             # Node value function, probAA from sequence * log2(probAA from sequence/background aa prob)
             position[aa] = aminoAcidProb*math.log2(aminoAcidProb / background_AA_frequency[aa])
 
-    initialSequenceComp = {aa: 0 for aa in aminoAcids}
-    initialSequenceComp['total'] = 0
+    initialSequenceComp = {aa: psuedoCount for aa in aminoAcids}
+    initialSequenceComp['total'] = 20*psuedoCount
     initialSeq = {}
     for position in posProbMap:
         if(position not in adjacencies):
             continue
-        res = inputSeq[position-1]
+        if(position in fixedPos):
+            res = fixedPos[position]
+        else:
+            res = 'A'   # Initiate all unfixed positions to Ala
         initialSeq[position] = res
         initialSequenceComp[res] += 1
         initialSequenceComp['total'] += 1
+    fixedPos = set(fixedPos.keys())
 
     # Defines the numerical value of a specificed residue at a specified position in the sequence
     # This is the "score function" for choosing a residue at a specific position
     def posValue(position, positionRes):
-        value = position_relative_weight*posProbMap[position][positionRes]
-
-        residuePercent = sequenceComp[positionRes]/sequenceComp['total']
-        value += sequenceComp_relative_weight*math.log2(residuePercent/background_AA_frequency[positionRes])
+        #value = position_relative_weight*posProbMap[position][positionRes]
+        posProbability = posProbMap[position][positionRes]
+        value = position_relative_weight*posProbability*math.log2(posProbability/background_AA_frequency[positionRes])
+        seqComp = sequenceComp[positionRes]/sequenceComp['total']
+        value += sequenceComp_relative_weight*seqComp*math.log2(seqComp/background_AA_frequency[positionRes])
 
         if(position in adjacencies):
             for adj in adjacencies[position]:
@@ -395,9 +422,9 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
 
     def evalSeq():
         seqValue = 0
-        seq = list(inputSeq)
+        seq = ['X']*(maxResInd-minResInd+1)
         for key in states:
-            seq[key-1] = states[key]
+            seq[key-minResInd] = states[key]
             seqValue += posValue(key, states[key])
         return ''.join(seq), seqValue
 
@@ -418,15 +445,17 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
         undefPos = " A NATAA"
 
         resFile = resFileHeader + '\n'
-        for i in range(1, len(seq) + 1):
+        for i in range(minResInd, maxResInd+1):
             if (i not in adjacencies):
                 resFile += str(i)
                 resFile += undefPos + '\t\t\t\t\t# '  + '\n'
                 ppm.append(skipRow)
                 continue
             elif (i in fixedPos):
-                resFile += str(i) + " A PIKAA " + seq[i - 1] + '\t\t\t\t\t#'  + ' fixed\n'
-                ppm.append(skipRow)
+                resFile += str(i) + " A PIKAA " + seq[i - minResInd] + '\t\t\t\t\t#'  + ' fixed\n'
+                baseLine = [0.0]*20
+                baseLine[aminoAcids.index(seq[i-minResInd])] = 1.0
+                ppm.append(baseLine)
                 continue
 
             aaWeights = {posValue(i, a): a for a in aminoAcids}
@@ -518,29 +547,31 @@ def buildMap(seqLen, posProbMap, jointProbMap, resConnections, fixedPos, backgro
 def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path,
               identifier:str = None, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
     if(identifier == None):
-        identifier = os.path.splitext(pdbFile)[0]
+        identifier = os.path.basename(pdbFile)[:-4]
     parser = PDBParser()
-    structure = parser.get_structure("", pdbFile)
+    pdbio = PDBIO()
+    with warnings.catch_warnings():
+        structure = parser.get_structure("", pdbFile)
+    pdbio.set_structure(structure)
     selectedChains = [chain for chain in structure.get_chains() if chain.get_id() in chainSelection]
-    foundIDs = []
-    sequenceLength = 0
+    minResInd = np.inf
+    maxResInd = 0
     for chain in selectedChains:
         for residue in chain:
-            if(residue.get_id()[1] not in foundIDs):
-                sequenceLength += 1
-                foundIDs.append(residue.get_id()[1])
-    resConnections = getAdjMap(selectedChains)
-    posProbMap, jointProbMap = initStruct(resConnections, outputLocation, parser)
-    out, rosetta, ppm = buildMap(sequenceLength, posProbMap, jointProbMap, resConnections, sequenceFixMap)
+            minResInd = min(minResInd, residue.get_id()[1])
+            maxResInd = max(maxResInd, residue.get_id()[1])
+    resConnections = getAdjMap(selectedChains, selectedChains)
+    posProbMap, jointProbMap, scaledMatchCount = initStruct(resConnections, outputLocation, parser, pdbio)
+    dataCollection, rosetta, ppm = buildMap(minResInd, maxResInd, posProbMap, jointProbMap, resConnections, sequenceFixMap)
 
     seqOut = os.path.join(outputLocation, identifier + '.fasta')
     with open(seqOut, 'w') as outFile:
-        for entry in out:
+        for entry in dataCollection:
             outFile.write('>' + str(round(entry[1], 2)) + '\n' + entry[0] + '\n')
 
     rosettaOut = os.path.join(outputLocation, identifier + '_resFile.txt')
     with open(rosettaOut, 'w') as outFile:
-        for entry in out:
+        for entry in dataCollection:
             outFile.write('>' + entry[0] + ', ' + str(round(entry[1], 2)) + '\n' + rosetta[entry] + '\n')
 
     ppm_obj = seqlogo.Ppm(ppm, alphabet_type='AA')
@@ -552,17 +583,14 @@ def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outp
         indepJointProbs = {}
         for X in bg_AA_freq:
             for Y in bg_AA_freq:
-                indepJointProbs[(X, Y)] = 2 * bg_AA_freq[X] * bg_AA_freq[Y]
-        positions = []
-        for key in jointProbMap:
-            positions.append(key)
-        positions.sort()
+                indepJointProbs[(X, Y)] = bg_AA_freq[X] * bg_AA_freq[Y]
+
         with open(jointProbOut, 'w') as outFile:
-            for key in positions:
-                outFile.write("Position: " + str(key) + '\n')
+            for keyPair in jointProbMap:
+                outFile.write("Position: " + str(keyPair) + '\n')
                 values = []
                 for resPair in indepJointProbs:
-                    prob = jointProbMap[key][resPair]
+                    prob = jointProbMap[keyPair][resPair]
                     logChange = math.log2(prob / indepJointProbs[resPair])
                     enrichment = prob * logChange
                     values.append((prob, enrichment, logChange, str(resPair)))
@@ -572,13 +600,189 @@ def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outp
                         break
                     outFile.write(val[3] + ": " + str(round(val[0], 3)) + ', ' + str(round(val[1], 3)) + ', ' + str(
                         round(val[2], 3)) + '\n')
+    return dataCollection, scaledMatchCount
 
-def designBBDataBase(inputBBDatabase: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path):
+def designBBDataBase(inputPDBDatabase: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path):
+    topScores = {}
+    matchCount = {}
+    for pdbFile in os.listdir(inputPDBDatabase):
+        if(pdbFile[-4:] != '.pdb'):
+            continue
+        identifier = pdbFile[:-4]
+        fullPath = os.path.join(inputPDBDatabase, pdbFile)
+        outputDir = os.path.join(outputLocation, identifier)
+        if not os.path.isdir(outputDir):
+            os.makedirs(outputDir)
+        dataOut, scaledMatchCount = designPDB(fullPath, chainSelection, sequenceFixMap, outputDir)
+        matchCount[identifier] = round(scaledMatchCount, 2)
+        if(len(dataOut) == 0):
+            topScores[identifier] = 0
+        else:
+            topScores[identifier] = round(dataOut[0][1], 2)
+        print(identifier+' done, '+str(topScores[identifier]))
+    topScores = {k: v for k, v in sorted(topScores.items(), key=lambda item: item[1], reverse=True)}
+    with open(os.path.join(outputLocation, 'topScores.txt'), 'w') as outFile:
+        for entry in topScores:
+            outFile.write(entry + '\t' + str(topScores[entry]) + '\t' + str(matchCount[entry]) + '\n')
     return
 
-def scorePDB(pdbFile: os.path, chainSelection: list, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
-    return
+def scorePDB(pdbFile: os.path, chainSelection: list, focusChains: list, outputMasterFilesLoc, outSeqTables = None, background_AA_frequency = bg_AA_freq,
+             position_relative_weight = positionRelWeight, sequenceComp_relative_weight = sequenceCompRelWeight):
+    parser = PDBParser()
+    pdbio = PDBIO()
+    with warnings.catch_warnings():
+        structure = parser.get_structure("", pdbFile)
+    pdbio.set_structure(structure)
+    selectedChains = [chain for chain in structure.get_chains() if chain.get_id() in chainSelection]
+    minResInd = np.inf
+    maxResInd = 0
+
+    for chain in selectedChains:
+        for residue in chain:
+            minResInd = min(minResInd, residue.get_id()[1])
+            maxResInd = max(maxResInd, residue.get_id()[1])
+    resConnections = getAdjMap(selectedChains, focusChains)
+    posProbMap, jointProbMap, scaledMatchCount = initStruct(resConnections, outputMasterFilesLoc, parser, pdbio, outputMasterFiles=True)
+
+    aminoAcids = list("ACDEFGHIKLMNPQRSTVYW")
+    adjacencies = {}  # Maps any index to all of its nearby (in 3D space) residue indicies
+    for keyPair in jointProbMap:
+        if (keyPair[0] not in adjacencies):
+            adjacencies[keyPair[0]] = [keyPair[1]]
+        else:
+            adjacencies[keyPair[0]].append(keyPair[1])
+        if (keyPair[1] not in adjacencies):
+            adjacencies[keyPair[1]] = [keyPair[0]]
+        else:
+            adjacencies[keyPair[1]].append(keyPair[0])
+    for keyPair in resConnections:
+        indexKeyPair = (keyPair[0].get_id()[1], keyPair[1].get_id()[1])
+        jointProbMap[indexKeyPair]['distance weight'] = resConnections[keyPair]
+
+    for val in adjacencies:
+        adjacencies[val] = list(set(adjacencies[val]))  # Remove duplicates
+
+    visited = []
+    for position in jointProbMap.values():
+        if (position in visited):
+            continue
+        visited.append(position)
+        for aaPair in position:
+            if (type(aaPair) != tuple):
+                continue
+            aaPairProb = position[aaPair]
+            # Edge value function, weight*prob*log2(joint prob/independent background prob)
+            position[aaPair] = position['distance weight'] \
+                               * aaPairProb \
+                               * math.log2(
+                aaPairProb / (background_AA_frequency[aaPair[0]] * background_AA_frequency[aaPair[1]]))
+
+    for position in posProbMap.values():
+        for aa in position:
+            aminoAcidProb = position[aa]
+            # Node value function, probAA from sequence * log2(probAA from sequence/background aa prob)
+            position[aa] = aminoAcidProb * math.log2(aminoAcidProb / background_AA_frequency[aa])
+
+    sequenceComp = {aa: psuedoCount for aa in aminoAcids}
+    sequenceComp['total'] = 20 * psuedoCount
+    states = {}
+    for position in posProbMap:
+        if (position not in adjacencies):
+            continue
+        else:
+            res = 'A'  # Initiate all unfixed positions to Ala
+        states[position] = res
+        sequenceComp[res] += 1
+        sequenceComp['total'] += 1
+
+    # Defines the numerical value of a specificed residue at a specified position in the sequence
+    # This is the "score function" for choosing a residue at a specific position
+    def posValue(position, positionRes):
+        # value = position_relative_weight*posProbMap[position][positionRes]
+        posProbability = posProbMap[position][positionRes]
+        value = position_relative_weight * posProbability * math.log2(posProbability / bg_AA_freq[positionRes])
+        seqComp = sequenceComp[positionRes] / sequenceComp['total']
+        value += sequenceComp_relative_weight * seqComp * math.log2(seqComp / bg_AA_freq[positionRes])
+
+        if (position in adjacencies):
+            for adj in adjacencies[position]:
+                value += jointProbMap[(position, adj)][(positionRes, states[adj])]
+        return value
+
+    def evalSeq():
+        seqValue = 0
+        seq = ['X'] * (maxResInd - minResInd + 1)
+        for key in states:
+            seq[key - minResInd] = states[key]
+            seqValue += posValue(key, states[key])
+        return ''.join(seq), seqValue
+
+    if (outSeqTables != None):
+        jointProbOut = outSeqTables+'_jointProb.txt'
+        indepJointProbs = {}
+        for X in bg_AA_freq:
+            for Y in bg_AA_freq:
+                indepJointProbs[(X, Y)] = bg_AA_freq[X] * bg_AA_freq[Y]
+
+        with open(jointProbOut, 'w') as outFile:
+            for keyPair in jointProbMap:
+                outFile.write("Position: " + str(keyPair) + '\n')
+                values = []
+                for resPair in indepJointProbs:
+                    prob = jointProbMap[keyPair][resPair]
+                    logChange = math.log2(prob / indepJointProbs[resPair])
+                    enrichment = prob * logChange
+                    values.append((prob, enrichment, logChange, str(resPair)))
+                values.sort(reverse=True)
+                for val in values:
+                    if (val[0] < 0.000001):
+                        break
+                    outFile.write(val[3] + ": " + str(round(val[0], 3)) + ', ' + str(round(val[1], 3)) + ', ' + str(
+                        round(val[2], 3)) + '\n')
+    return evalSeq()
+
+def scorePDBDatabase(inputPDBDatabase: os.path, chainSelection: list, focusChains: list, outputLoc: os.path):
+    outCSV = os.path.join(outputLoc, 'score.csv')
+    with open(outCSV,'w') as out:
+        for pdbFile in os.listdir(inputPDBDatabase):
+            if(pdbFile[-4:] != '.pdb'):
+                continue
+            seq, score = scorePDB(os.path.join(inputPDBDatabase, pdbFile), chainSelection, focusChains, outputLoc)
+            out.write(str(pdbFile[:-4])+','+str(round(score,3))+','+seq)
 
 if __name__ == '__main__':
     import argparse
+    argparser = argparse.ArgumentParser(prog='Design PDB', description='Select amino acids for a given backbone that optimize covariant interactions')
+    argparser.add_argument('-p', '--program', type=str, help='Specify which program to run [designPDB, designPDBDatabase, scorePDB, scorePDBDatabase]', required=True)
+    argparser.add_argument('-in', '--inputPDB', type=str, help='PDB input file or location of PDB input database', required=True)
+    argparser.add_argument('-c', '--inputChains', type=str,
+                           help='List of chains to consider, ie: -c ABC', required=True)
+    argparser.add_argument('-o', '--output', type=str,
+                           help='Output directory to write files to',
+                           required=True)
+    argparser.add_argument('-fix', '--fixedRes', type=str, help='List of positions and a corresponding amino acid that will not be altered in designPDB, ie 23A,45D,12C', required=False)
+    argparser.add_argument('-fChains', '--focusChains', type=str, help='List of chains to focus on in scorePDB, will only consider interactions made by these chains, by default'
+                                                                       'is all selected chains. Specifying could significantly speed up runtime', required=False)
+    args = argparser.parse_args()
 
+    inputChains = list(args.inputChains)
+    outputLoc = os.path.normpath(args.output)
+    inputPDB = os.path.normpath(args.inputPDB)
+    if (args.focusChains):
+        fChain = args.focusChains
+    else:
+        fChain = inputChains
+
+    if(args.fixedRes):
+        fixedResMap = {int(posRes[:-1]): posRes[-1:] for posRes in args.fixedRes.split(',')}
+    else:
+        fixedResMap = {}
+    if(args.program == 'designPDB'):
+        designPDB(inputPDB, inputChains, fixedResMap, outputLoc)
+    elif(args.program == 'designPDBDatabase'):
+        designBBDataBase(inputPDB, inputChains, fixedResMap, outputLoc)
+    elif(args.program == 'scorePDB'):
+        seq, score = scorePDB(inputPDB, inputChains, fChain, outputLoc)
+        print("Score: "+str(round(score,3)))
+    elif(args.program == 'scorePDBDatabase'):
+        scorePDBDatabase(inputPDB, inputChains, fChain, outputLoc)
