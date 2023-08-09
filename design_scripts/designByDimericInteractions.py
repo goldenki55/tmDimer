@@ -544,7 +544,7 @@ def buildMap(minResInd, maxResInd, posProbMap, jointProbMap, resConnections, fix
 
 
 
-def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path,
+def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, focusChains: list, outputLocation: os.path,
               identifier:str = None, outSeqTables = outSeqTables, bg_AA_freq = bg_AA_freq):
     if(identifier == None):
         identifier = os.path.basename(pdbFile)[:-4]
@@ -554,13 +554,14 @@ def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outp
         structure = parser.get_structure("", pdbFile)
     pdbio.set_structure(structure)
     selectedChains = [chain for chain in structure.get_chains() if chain.get_id() in chainSelection]
+    focusChains = [chain for chain in structure.get_chains() if chain.get_id() in focusChains]
     minResInd = np.inf
     maxResInd = 0
     for chain in selectedChains:
         for residue in chain:
             minResInd = min(minResInd, residue.get_id()[1])
             maxResInd = max(maxResInd, residue.get_id()[1])
-    resConnections = getAdjMap(selectedChains, selectedChains)
+    resConnections = getAdjMap(selectedChains, focusChains)
     posProbMap, jointProbMap, scaledMatchCount = initStruct(resConnections, outputLocation, parser, pdbio)
     dataCollection, rosetta, ppm = buildMap(minResInd, maxResInd, posProbMap, jointProbMap, resConnections, sequenceFixMap)
 
@@ -602,7 +603,7 @@ def designPDB(pdbFile: os.path, chainSelection: list, sequenceFixMap: dict, outp
                         round(val[2], 3)) + '\n')
     return dataCollection, scaledMatchCount
 
-def designBBDataBase(inputPDBDatabase: os.path, chainSelection: list, sequenceFixMap: dict, outputLocation: os.path):
+def designBBDataBase(inputPDBDatabase: os.path, chainSelection: list, sequenceFixMap: dict, focusChains: list, outputLocation: os.path):
     topScores = {}
     matchCount = {}
     for pdbFile in os.listdir(inputPDBDatabase):
@@ -613,7 +614,7 @@ def designBBDataBase(inputPDBDatabase: os.path, chainSelection: list, sequenceFi
         outputDir = os.path.join(outputLocation, identifier)
         if not os.path.isdir(outputDir):
             os.makedirs(outputDir)
-        dataOut, scaledMatchCount = designPDB(fullPath, chainSelection, sequenceFixMap, outputDir)
+        dataOut, scaledMatchCount = designPDB(fullPath, chainSelection, sequenceFixMap, focusChains, outputDir)
         matchCount[identifier] = round(scaledMatchCount, 2)
         if(len(dataOut) == 0):
             topScores[identifier] = 0
@@ -634,6 +635,7 @@ def scorePDB(pdbFile: os.path, chainSelection: list, focusChains: list, outputMa
         structure = parser.get_structure("", pdbFile)
     pdbio.set_structure(structure)
     selectedChains = [chain for chain in structure.get_chains() if chain.get_id() in chainSelection]
+    focusChains = [chain for chain in structure.get_chains() if chain.get_id() in focusChains]
     minResInd = np.inf
     maxResInd = 0
 
@@ -761,6 +763,8 @@ if __name__ == '__main__':
                            help='Output directory to write files to',
                            required=True)
     argparser.add_argument('-fix', '--fixedRes', type=str, help='List of positions and a corresponding amino acid that will not be altered in designPDB, ie 23A,45D,12C', required=False)
+    argparser.add_argument('-fixC','--fixedChains', type=str, help='List of chains (ie AC) to fix all residues to their input residue on, will fix by index so all other chains with matching index will be fixed to that residue.'
+                                                                   'If a database of pdbs is provided, will select one PDB to generate fix from', required=False)
     argparser.add_argument('-fChains', '--focusChains', type=str, help='List of chains to focus on in scorePDB, will only consider interactions made by these chains, by default'
                                                                        'is all selected chains. Specifying could significantly speed up runtime', required=False)
     args = argparser.parse_args()
@@ -769,14 +773,32 @@ if __name__ == '__main__':
     outputLoc = os.path.normpath(args.output)
     inputPDB = os.path.normpath(args.inputPDB)
     if (args.focusChains):
-        fChain = args.focusChains
+        fChain = list(args.focusChains)
     else:
         fChain = inputChains
-
+    fixedResMap = {}
     if(args.fixedRes):
         fixedResMap = {int(posRes[:-1]): posRes[-1:] for posRes in args.fixedRes.split(',')}
-    else:
-        fixedResMap = {}
+    if(args.fixedChains):
+        fixedChains = list(args.fixedChains)
+        if(os.path.isdir(inputPDB)):
+            for file in os.listdir(inputPDB):
+                if (file[-4:] != '.pdb'):
+                    continue
+                pdbFile = os.path.join(inputPDB, file)
+                break
+        else:
+            pdbFile = inputPDB
+
+        parser = PDBParser()
+        with warnings.catch_warnings():
+            structure = parser.get_structure("", pdbFile)
+        fixedChains = [chain for chain in structure.get_chains() if chain.get_id() in fixedChains]
+        for chain in fixedChains:
+            for residue in chain:
+                resName = protein_letters_3to1_extended(residue.get_resname())
+                fixedResMap[int(residue.get_id()[1])] = resName
+
     if(args.program == 'designPDB'):
         designPDB(inputPDB, inputChains, fixedResMap, outputLoc)
     elif(args.program == 'designPDBDatabase'):
