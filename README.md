@@ -28,3 +28,15 @@ numpy v1.23.5
 
 both of which can be installed with pip and should be fine at the versions listed or more recent versions. 
 
+## Running
+
+The design script can be run on either one individual backbone or a database of backbones. To enforce symmetry, residues with the same index in the PDB (regardless of chain) are treated as being forced to have the same amino acid assignment. Additionally, all residue assignments in the input structure are overwritten. To run on one backbone, you can use
+```
+python designByDimericInteractions.py -p designPDB -in 01322.d29bf65c881e.allbb_polyA.pdb -c AB -o output/
+```
+
+Or run on a directory containing many different backbones as
+```
+python designByDimericInteractions.py -p designPDBDatabase -in backbones/ -c AB -o output/
+```
+
