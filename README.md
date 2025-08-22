@@ -40,3 +40,8 @@ Or run on a directory containing many different backbones as
 python designByDimericInteractions.py -p designPDBDatabase -in backbones/ -c AB -o output/
 ```
 
+## Reference
+Design principles of the common Gly-X6-Gly membrane protein building block. Kiana Golden, Catalina Avarvarei, Charles T Anderson, Matthew Holcomb, Weiyi Tang, Xiaoping Dai, Minghao Zhang, Colleen A Maillie, Brittany B. Sanchez, Jason S. Chen, Stefano Forli, Marco Mravic. Proc Natl Acad Sci USA. 2025
+
+
+
