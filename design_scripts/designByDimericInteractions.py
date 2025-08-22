@@ -4,11 +4,14 @@ import os, math, copy, random, seqlogo
 import subprocess
 import numpy as np
 import warnings
-# August 2023 version, J. Golden, Mravic Lab, Scripps Research
+# Aug 2025 version, K. Golden, Mravic Lab, Scripps Research
+
+
+
 # ASSUMES THAT RESIDUES WITH THE SAME NUMBER ARE THE SAME RESIDUE INDEPENDENT OF CHAIN
 # Please renumber residues if you want them to not be the same residue
 
-
+# reads in designPARAMS file and sets values to defaults or raises errors if not specified
 def parsePARAMS(paramFile):
     masterCreatePDSPath = None
     masterPath = None
@@ -808,3 +811,4 @@ if __name__ == '__main__':
         print("Score: "+str(round(score,3)))
     elif(args.program == 'scorePDBDatabase'):
         scorePDBDatabase(inputPDB, inputChains, fChain, outputLoc)
+
